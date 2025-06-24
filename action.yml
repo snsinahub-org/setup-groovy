@@ -167,12 +167,11 @@ runs:
         fi
 
         # Install SDKMAN if not present
-        if [ ! -d "$HOME/.sdkman" ]; then
+        if [ ! -d "$HOME/.sdkman" ] || ! command -v sdk &> /dev/null; then
           echo "Installing SDKMAN..."
           
-          # Create .sdkman directory with proper permissions
-          mkdir -p "$HOME/.sdkman"
-          chmod 755 "$HOME/.sdkman"
+          # Remove any partial installation
+          rm -rf "$HOME/.sdkman" 2>/dev/null || true
           
           # Download and install SDKMAN with retry logic
           max_attempts=3
@@ -181,41 +180,102 @@ runs:
           while [ $attempt -le $max_attempts ]; do
             echo "SDKMAN installation attempt $attempt/$max_attempts..."
             
+            # Download SDKMAN installer and run it
             if curl -s "https://get.sdkman.io" | bash; then
-              echo "✅ SDKMAN downloaded and installed successfully"
-              break
-            else
-              echo "❌ SDKMAN installation attempt $attempt failed"
-              if [ $attempt -eq $max_attempts ]; then
-                echo "❌ ERROR: SDKMAN installation failed after $max_attempts attempts"
-                echo "Please check network connectivity and try again"
-                exit 1
+              echo "✅ SDKMAN installer completed"
+              
+              # Source SDKMAN to make it available in current shell
+              if [ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+                source "$HOME/.sdkman/bin/sdkman-init.sh"
+                echo "✅ SDKMAN sourced successfully"
+                break
+              else
+                echo "⚠️  SDKMAN init script not found, checking alternatives..."
+                
+                # Check if SDKMAN was installed in a different location or structure
+                find "$HOME/.sdkman" -name "sdkman-init.sh" -type f 2>/dev/null | head -1 | while read init_script; do
+                  if [ -n "$init_script" ]; then
+                    echo "Found SDKMAN init script at: $init_script"
+                    source "$init_script"
+                    break 2
+                  fi
+                done
+                
+                # If we still can't find it, check if sdk command is available
+                if command -v sdk &> /dev/null; then
+                  echo "✅ SDKMAN SDK command is available"
+                  break
+                fi
               fi
-              attempt=$((attempt + 1))
-              sleep 2
             fi
+            
+            echo "❌ SDKMAN installation attempt $attempt failed"
+            if [ $attempt -eq $max_attempts ]; then
+              echo "❌ ERROR: SDKMAN installation failed after $max_attempts attempts"
+              echo "Debug information:"
+              echo "Home directory: $HOME"
+              echo "Contents of home:"
+              ls -la "$HOME/" | grep -E "\\.sdkman|sdk" || echo "No SDKMAN-related files found"
+              if [ -d "$HOME/.sdkman" ]; then
+                echo "Contents of .sdkman:"
+                find "$HOME/.sdkman" -type f | head -20
+              fi
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
           done
           
-          # Verify SDKMAN installation
-          if [ ! -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+          # Final verification - check if we can use SDKMAN
+          if command -v sdk &> /dev/null; then
+            echo "✅ SDKMAN installed and SDK command available"
+          elif [ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+            source "$HOME/.sdkman/bin/sdkman-init.sh"
+            if command -v sdk &> /dev/null; then
+              echo "✅ SDKMAN installed and SDK command available after sourcing"
+            else
+              echo "❌ ERROR: SDKMAN installed but SDK command not available"
+              exit 1
+            fi
+          else
             echo "❌ ERROR: SDKMAN installation verification failed"
-            echo "Expected file not found: $HOME/.sdkman/bin/sdkman-init.sh"
+            echo "Debug: Listing .sdkman directory structure:"
+            find "$HOME/.sdkman" -type f 2>/dev/null | head -20 || echo "No .sdkman directory found"
             exit 1
           fi
-          
-          echo "✅ SDKMAN installed successfully"
         else
           echo "✅ SDKMAN already installed"
         fi
         
-        # Initialize SDKMAN
-        source "$HOME/.sdkman/bin/sdkman-init.sh"
+        # Initialize SDKMAN for use
+        echo "Initializing SDKMAN..."
+        if [ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+          source "$HOME/.sdkman/bin/sdkman-init.sh"
+        else
+          # Try to find SDKMAN init script in case it's in a different location
+          SDKMAN_INIT=$(find "$HOME/.sdkman" -name "sdkman-init.sh" -type f 2>/dev/null | head -1)
+          if [ -n "$SDKMAN_INIT" ]; then
+            echo "Found SDKMAN init script at: $SDKMAN_INIT"
+            source "$SDKMAN_INIT"
+          fi
+        fi
         
         # Verify SDKMAN is working
         if ! command -v sdk &> /dev/null; then
-          echo "❌ ERROR: SDKMAN initialization failed"
+          echo "❌ ERROR: SDKMAN initialization failed - SDK command not available"
+          echo "Debug information:"
+          echo "PATH: $PATH"
+          echo "SDKMAN_DIR: ${SDKMAN_DIR:-Not set}"
+          echo "Home directory contents:"
+          ls -la "$HOME/" | grep -E "\\.sdkman|sdk" || echo "No SDKMAN-related files found"
+          if [ -d "$HOME/.sdkman" ]; then
+            echo "SDKMAN directory structure:"
+            find "$HOME/.sdkman" -name "*.sh" -o -name "sdk" -type f 2>/dev/null | head -10
+          fi
           exit 1
         fi
+        
+        echo "✅ SDKMAN initialized successfully"
 
         # Install Groovy
         if [[ -n "${{ inputs.groovy-version }}" ]]; then

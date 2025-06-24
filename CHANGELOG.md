@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **SHELL COMPATIBILITY**: Removed `local` variable declarations from main script scope to fix "local: can only be used in a function" error on Linux and macOS runners
+- **SDKMAN INSTALLATION**: Enhanced SDKMAN installation verification and initialization to handle different installation structures and file locations
+- **LINUX/MACOS COMPATIBILITY**: Improved SDKMAN detection and sourcing to fix "Expected file not found: sdkman-init.sh" errors
 - Improved shell compatibility across different GitHub Actions runner environments
 
 ### Changed
