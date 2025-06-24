@@ -175,8 +175,8 @@ runs:
           chmod 755 "$HOME/.sdkman"
           
           # Download and install SDKMAN with retry logic
-          local max_attempts=3
-          local attempt=1
+          max_attempts=3
+          attempt=1
           
           while [ $attempt -le $max_attempts ]; do
             echo "SDKMAN installation attempt $attempt/$max_attempts..."

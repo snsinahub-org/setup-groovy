@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for Java versions 8, 11, 17, and 21 with smart package manager mapping
 - Dynamic Homebrew prefix detection for complete portability across Intel/Apple Silicon Macs
 
+### Fixed
+- **SHELL COMPATIBILITY**: Removed `local` variable declarations from main script scope to fix "local: can only be used in a function" error on Linux and macOS runners
+- Improved shell compatibility across different GitHub Actions runner environments
+
 ### Changed
 - **BREAKING**: Default Java version changed from 11 to 17 (current LTS)
 - Enhanced Java installation logic with version-specific package selection
