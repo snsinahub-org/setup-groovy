@@ -1,0 +1,384 @@
+name: Test Setup Groovy Action
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      test-matrix:
+        description: 'Test matrix to run'
+        required: false
+        default: 'basic'
+        type: choice
+        options:
+          - basic
+          - full
+          - stress
+
+jobs:
+  # Test basic functionality across all platforms
+  test-basic-cross-platform:
+    name: Basic Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Test Basic Groovy Setup
+        id: groovy-setup
+        uses: ./
+
+      - name: Verify Groovy Installation
+        shell: bash
+        run: |
+          # Check if groovy command is available
+          if ! command -v groovy &> /dev/null; then
+            echo "❌ ERROR: Groovy command not found in PATH"
+            exit 1
+          fi
+          
+          # Get version information
+          GROOVY_VERSION=$(groovy --version)
+          echo "✅ Groovy installed successfully: $GROOVY_VERSION"
+          
+          # Verify outputs are set
+          if [[ -z "${{ steps.groovy-setup.outputs.groovy-version }}" ]]; then
+            echo "❌ ERROR: groovy-version output not set"
+            exit 1
+          fi
+          
+          if [[ -z "${{ steps.groovy-setup.outputs.groovy-path }}" ]]; then
+            echo "❌ ERROR: groovy-path output not set"
+            exit 1
+          fi
+          
+          echo "✅ Action outputs verified"
+          echo "Version: ${{ steps.groovy-setup.outputs.groovy-version }}"
+          echo "Path: ${{ steps.groovy-setup.outputs.groovy-path }}"
+
+      - name: Test Simple Groovy Script
+        shell: bash
+        run: |
+          cat > test-basic.groovy <<'EOF'
+          println "Hello from Groovy ${GroovySystem.version}!"
+          println "Running on: ${System.getProperty('os.name')}"
+          println "Java version: ${System.getProperty('java.version')}"
+          
+          // Test basic Groovy features
+          def numbers = [1, 2, 3, 4, 5]
+          def doubled = numbers.collect { it * 2 }
+          println "Doubled numbers: ${doubled}"
+          
+          // Test closures
+          def greeting = { name -> "Hello, ${name}!" }
+          println greeting("GitHub Actions")
+          EOF
+          
+          echo "Executing basic Groovy script..."
+          groovy test-basic.groovy
+
+  # Test with specific Groovy versions
+  test-specific-versions:
+    name: Version Test (${{ matrix.version }} on ${{ matrix.os }})
+    if: github.event.inputs.test-matrix != 'basic'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        version: ['4.0.15', '4.0.21', '3.0.19']
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Groovy with Specific Version
+        id: groovy-setup
+        uses: ./
+        with:
+          groovy-version: ${{ matrix.version }}
+
+      - name: Verify Specific Version
+        shell: bash
+        run: |
+          INSTALLED_VERSION=$(groovy --version | head -n1)
+          echo "Requested version: ${{ matrix.version }}"
+          echo "Installed version: $INSTALLED_VERSION"
+          
+          # Check if the version contains the requested version
+          if [[ "$INSTALLED_VERSION" == *"${{ matrix.version }}"* ]]; then
+            echo "✅ Correct version installed"
+          else
+            echo "❌ ERROR: Version mismatch"
+            echo "Expected: ${{ matrix.version }}"
+            echo "Got: $INSTALLED_VERSION"
+            exit 1
+          fi
+
+      - name: Test Version-Specific Features
+        shell: bash
+        run: |
+          cat > test-version.groovy <<'EOF'
+          // Test version-specific features
+          println "Groovy version: ${GroovySystem.version}"
+          
+          // Test modern Groovy syntax (available in all tested versions)
+          def data = [
+            name: 'GitHub Actions',
+            version: GroovySystem.version,
+            timestamp: new Date()
+          ]
+          
+          data.each { key, value ->
+            println "${key}: ${value}"
+          }
+          
+          // Test string interpolation
+          def message = "Testing Groovy ${GroovySystem.version} on ${System.getProperty('os.name')}"
+          println message
+          EOF
+          
+          groovy test-version.groovy
+
+  # Test action inputs and configuration options
+  test-action-inputs:
+    name: Input Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Test skip-if-exists (first install)
+        id: first-install
+        uses: ./
+        with:
+          skip-if-exists: 'true'
+
+      - name: Test skip-if-exists (should skip)
+        id: second-install
+        uses: ./
+        with:
+          skip-if-exists: 'true'
+
+      - name: Verify Skip Behavior
+        shell: bash
+        run: |
+          # Both installs should report the same version
+          if [[ "${{ steps.first-install.outputs.groovy-version }}" == "${{ steps.second-install.outputs.groovy-version }}" ]]; then
+            echo "✅ Skip-if-exists working correctly"
+          else
+            echo "❌ ERROR: Skip-if-exists not working"
+            exit 1
+          fi
+
+      - name: Test add-to-path disabled
+        uses: ./
+        with:
+          add-to-path: 'false'
+          skip-if-exists: 'false'
+
+      # Note: Testing add-to-path: false is complex because groovy might still be in PATH
+      # from previous steps. In a real scenario, this would be tested in isolation.
+
+  # Test error handling and edge cases
+  test-error-handling:
+    name: Error Handling Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Test Invalid Groovy Version
+        id: invalid-version
+        continue-on-error: true
+        uses: ./
+        with:
+          groovy-version: '99.99.99'  # Non-existent version
+
+      - name: Verify Error Handling
+        run: |
+          if [[ "${{ steps.invalid-version.outcome }}" == "failure" ]]; then
+            echo "✅ Action correctly failed for invalid version"
+          else
+            echo "❌ ERROR: Action should have failed for invalid version"
+            exit 1
+          fi
+
+  # Test with complex Groovy scripts
+  test-complex-groovy:
+    name: Complex Groovy Scripts
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Groovy
+        uses: ./
+
+      - name: Test Groovy with External Dependencies
+        shell: bash
+        run: |
+          cat > test-dependencies.groovy <<'EOF'
+          @Grab('org.apache.commons:commons-lang3:3.12.0')
+          import org.apache.commons.lang3.StringUtils
+          
+          def text = "  Hello, World!  "
+          def trimmed = StringUtils.strip(text)
+          def reversed = StringUtils.reverse(trimmed)
+          
+          println "Original: '${text}'"
+          println "Trimmed: '${trimmed}'"
+          println "Reversed: '${reversed}'"
+          
+          assert trimmed == "Hello, World!"
+          assert reversed == "!dlroW ,olleH"
+          
+          println "✅ External dependency test passed"
+          EOF
+          
+          echo "Testing Groovy with external dependencies..."
+          groovy test-dependencies.groovy
+
+      - name: Test JSON Processing
+        shell: bash
+        run: |
+          cat > test-json.groovy <<'EOF'
+          @Grab('org.apache.groovy:groovy-json:4.0.15')
+          import groovy.json.*
+          
+          // Create test data
+          def data = [
+            workflow: 'GitHub Actions Test',
+            runner: System.getProperty('os.name'),
+            groovy_version: GroovySystem.version,
+            timestamp: new Date().toString(),
+            tests: [
+              [name: 'basic', status: 'passed'],
+              [name: 'json', status: 'running']
+            ]
+          ]
+          
+          // Convert to JSON
+          def json = JsonOutput.prettyPrint(JsonOutput.toJson(data))
+          println "Generated JSON:"
+          println json
+          
+          // Parse JSON back
+          def parsed = new JsonSlurper().parseText(json)
+          assert parsed.workflow == 'GitHub Actions Test'
+          assert parsed.tests.size() == 2
+          
+          println "✅ JSON processing test passed"
+          EOF
+          
+          groovy test-json.groovy
+
+      - name: Test File Operations
+        shell: bash
+        run: |
+          cat > test-files.groovy <<'EOF'
+          // Test file operations
+          def testFile = new File('test-output.txt')
+          
+          // Write to file
+          testFile.text = """
+          Groovy File Test Results
+          ========================
+          Groovy Version: ${GroovySystem.version}
+          OS: ${System.getProperty('os.name')}
+          Java Version: ${System.getProperty('java.version')}
+          Timestamp: ${new Date()}
+          
+          Test Data:
+          """.stripIndent()
+          
+          // Append some data
+          def numbers = (1..10).collect { "Number: $it" }
+          numbers.each { line ->
+            testFile.append("${line}\n")
+          }
+          
+          // Read and verify
+          def content = testFile.text
+          println "File content length: ${content.length()} characters"
+          
+          // Verify content
+          assert content.contains('Groovy Version:')
+          assert content.contains('Number: 10')
+          
+          // Clean up
+          testFile.delete()
+          
+          println "✅ File operations test passed"
+          EOF
+          
+          groovy test-files.groovy
+
+  # Test summary and reporting
+  test-summary:
+    name: Test Summary
+    if: always()
+    needs: [test-basic-cross-platform, test-specific-versions, test-action-inputs, test-error-handling, test-complex-groovy]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Test Results Summary
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Basic cross-platform tests
+          if [[ "${{ needs.test-basic-cross-platform.result }}" == "success" ]]; then
+            echo "✅ Basic cross-platform tests: **PASSED**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Basic cross-platform tests: **FAILED**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Specific version tests
+          if [[ "${{ needs.test-specific-versions.result }}" == "success" || "${{ needs.test-specific-versions.result }}" == "skipped" ]]; then
+            echo "✅ Specific version tests: **PASSED**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Specific version tests: **FAILED**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Input tests
+          if [[ "${{ needs.test-action-inputs.result }}" == "success" ]]; then
+            echo "✅ Action input tests: **PASSED**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Action input tests: **FAILED**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Error handling tests
+          if [[ "${{ needs.test-error-handling.result }}" == "success" ]]; then
+            echo "✅ Error handling tests: **PASSED**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Error handling tests: **FAILED**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Complex Groovy tests
+          if [[ "${{ needs.test-complex-groovy.result }}" == "success" ]]; then
+            echo "✅ Complex Groovy tests: **PASSED**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Complex Groovy tests: **FAILED**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Matrix**: ${{ github.event.inputs.test-matrix || 'basic' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

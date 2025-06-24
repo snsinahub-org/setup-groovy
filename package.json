@@ -1,0 +1,33 @@
+{
+  "name": "setup-groovy-action",
+  "version": "1.0.0",
+  "description": "GitHub Action to install and configure Groovy runtime using SDKMAN for cross-platform CI/CD workflows",
+  "main": "action.yml",
+  "scripts": {
+    "test": "./tests/run-all-tests.sh",
+    "test:unit": "./tests/test-action.sh",
+    "test:integration": "./tests/test-integration.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snsinahub-org/setup-groovy.git"
+  },
+  "keywords": [
+    "github-actions",
+    "groovy",
+    "sdkman",
+    "ci-cd",
+    "cross-platform",
+    "automation",
+    "build-tools"
+  ],
+  "author": "Setup Groovy Action Team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/snsinahub-org/setup-groovy/issues"
+  },
+  "homepage": "https://github.com/snsinahub-org/setup-groovy#readme",
+  "engines": {
+    "node": ">=16"
+  }
+}

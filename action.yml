@@ -1,0 +1,545 @@
+name: 'Setup Groovy Environment'
+description: 'Install and configure Groovy runtime using SDKMAN for GitHub Actions workflows'
+author: 'Setup Groovy Action Team'
+
+branding:
+  icon: 'code'
+  color: 'blue'
+
+inputs:
+  groovy-version:
+    description: 'Version of Groovy to install (default: latest stable)'
+    required: false
+    default: ''
+  java-version:
+    description: 'Version of Java to install if not present (default: 17)'
+    required: false
+    default: '17'
+  skip-if-exists:
+    description: 'Skip installation if Groovy is already available'
+    required: false
+    default: 'true'
+  add-to-path:
+    description: 'Add Groovy to PATH for subsequent steps'
+    required: false
+    default: 'true'
+
+outputs:
+  groovy-version:
+    description: 'The version of Groovy that was installed'
+    value: ${{ steps.setup.outputs.groovy-version }}
+  groovy-path:
+    description: 'Path to the Groovy installation'
+    value: ${{ steps.setup.outputs.groovy-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect Operating System
+      id: detect-os
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          echo "os=windows" >> $GITHUB_OUTPUT
+          echo "shell=pwsh" >> $GITHUB_OUTPUT
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          echo "os=macos" >> $GITHUB_OUTPUT
+          echo "shell=bash" >> $GITHUB_OUTPUT
+        else
+          echo "os=linux" >> $GITHUB_OUTPUT
+          echo "shell=bash" >> $GITHUB_OUTPUT
+        fi
+        echo "Detected OS: $RUNNER_OS"
+
+    - name: Setup Groovy Environment (Linux/macOS)
+      id: setup-unix
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -e
+        
+        # Check if Groovy is already installed and skip-if-exists is true
+        if [[ "${{ inputs.skip-if-exists }}" == "true" ]] && command -v groovy &> /dev/null; then
+          echo "Groovy is already installed: $(groovy --version)"
+          EXISTING_VERSION=$(groovy --version | head -n1)
+          echo "groovy-version=${EXISTING_VERSION}" >> $GITHUB_OUTPUT
+          echo "groovy-path=$(which groovy | xargs dirname)" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Ensure required tools are available
+        echo "Checking system prerequisites..."
+        
+        # Function to install packages with multiple package managers
+        install_package() {
+          local package=$1
+          echo "Installing $package..."
+          
+          if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y "$package"
+          elif command -v yum &> /dev/null; then
+            sudo yum install -y "$package"
+          elif command -v dnf &> /dev/null; then
+            sudo dnf install -y "$package"
+          elif command -v pacman &> /dev/null; then
+            sudo pacman -S --noconfirm "$package"
+          elif command -v brew &> /dev/null; then
+            brew install "$package"
+          else
+            echo "❌ ERROR: Cannot install $package automatically. Unsupported package manager."
+            echo "Please install $package manually or use a supported Linux distribution."
+            exit 1
+          fi
+        }
+        
+        # Install curl if not available (required for SDKMAN)
+        if ! command -v curl &> /dev/null; then
+          install_package curl
+        fi
+        
+        # Install unzip if not available (required for SDKMAN)
+        if ! command -v unzip &> /dev/null; then
+          install_package unzip
+        fi
+        
+        # Install zip if not available (required for SDKMAN)
+        if ! command -v zip &> /dev/null; then
+          install_package zip
+        fi
+        
+        # Ensure Java is available (required for Groovy)
+        if ! command -v java &> /dev/null; then
+          JAVA_VERSION="${{ inputs.java-version }}"
+          echo "Java not found. Installing OpenJDK ${JAVA_VERSION}..."
+          
+          if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y "openjdk-${JAVA_VERSION}-jdk"
+          elif command -v yum &> /dev/null; then
+            sudo yum install -y "java-${JAVA_VERSION}-openjdk-devel"
+          elif command -v dnf &> /dev/null; then
+            sudo dnf install -y "java-${JAVA_VERSION}-openjdk-devel"
+          elif command -v pacman &> /dev/null; then
+            # Arch Linux uses different naming - map common versions
+            case $JAVA_VERSION in
+              8) sudo pacman -S --noconfirm jdk8-openjdk ;;
+              11) sudo pacman -S --noconfirm jdk11-openjdk ;;
+              17) sudo pacman -S --noconfirm jdk17-openjdk ;;
+              21) sudo pacman -S --noconfirm jdk21-openjdk ;;
+              *) sudo pacman -S --noconfirm jdk-openjdk ;; # Latest available
+            esac
+          elif command -v brew &> /dev/null; then
+            # Homebrew uses different naming for OpenJDK versions
+            # Detect Homebrew prefix dynamically (Intel vs Apple Silicon)
+            BREW_PREFIX=$(brew --prefix)
+            
+            case $JAVA_VERSION in
+              8) brew install openjdk@8 && OPENJDK_PATH="${BREW_PREFIX}/opt/openjdk@8/bin" ;;
+              11) brew install openjdk@11 && OPENJDK_PATH="${BREW_PREFIX}/opt/openjdk@11/bin" ;;
+              17) brew install openjdk@17 && OPENJDK_PATH="${BREW_PREFIX}/opt/openjdk@17/bin" ;;
+              21) brew install openjdk@21 && OPENJDK_PATH="${BREW_PREFIX}/opt/openjdk@21/bin" ;;
+              *) brew install openjdk && OPENJDK_PATH="${BREW_PREFIX}/opt/openjdk/bin" ;;
+            esac
+            
+            # Add to PATH for current session and future steps
+            if [[ -n "$OPENJDK_PATH" && -d "$OPENJDK_PATH" ]]; then
+              export PATH="${OPENJDK_PATH}:$PATH"
+              echo "${OPENJDK_PATH}" >> $GITHUB_PATH
+              echo "✅ Java ${JAVA_VERSION} installed and added to PATH: ${OPENJDK_PATH}"
+            else
+              echo "⚠️ WARNING: Java installation completed but path not found: ${OPENJDK_PATH}"
+            fi
+          else
+            echo "❌ ERROR: Cannot install Java automatically. Unsupported package manager."
+            echo "Please install Java ${JAVA_VERSION} or higher manually, or use actions/setup-java in your workflow."
+            exit 1
+          fi
+          
+          # Verify Java installation
+          if ! command -v java &> /dev/null; then
+            echo "❌ ERROR: Java installation failed or not in PATH"
+            exit 1
+          fi
+          
+          java -version
+          echo "✅ Java installed successfully"
+        else
+          echo "✅ Java is already available: $(java -version 2>&1 | head -n1)"
+        fi
+
+        # Install SDKMAN if not present
+        if [ ! -d "$HOME/.sdkman" ]; then
+          echo "Installing SDKMAN..."
+          
+          # Create .sdkman directory with proper permissions
+          mkdir -p "$HOME/.sdkman"
+          chmod 755 "$HOME/.sdkman"
+          
+          # Download and install SDKMAN with retry logic
+          local max_attempts=3
+          local attempt=1
+          
+          while [ $attempt -le $max_attempts ]; do
+            echo "SDKMAN installation attempt $attempt/$max_attempts..."
+            
+            if curl -s "https://get.sdkman.io" | bash; then
+              echo "✅ SDKMAN downloaded and installed successfully"
+              break
+            else
+              echo "❌ SDKMAN installation attempt $attempt failed"
+              if [ $attempt -eq $max_attempts ]; then
+                echo "❌ ERROR: SDKMAN installation failed after $max_attempts attempts"
+                echo "Please check network connectivity and try again"
+                exit 1
+              fi
+              attempt=$((attempt + 1))
+              sleep 2
+            fi
+          done
+          
+          # Verify SDKMAN installation
+          if [ ! -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+            echo "❌ ERROR: SDKMAN installation verification failed"
+            echo "Expected file not found: $HOME/.sdkman/bin/sdkman-init.sh"
+            exit 1
+          fi
+          
+          echo "✅ SDKMAN installed successfully"
+        else
+          echo "✅ SDKMAN already installed"
+        fi
+        
+        # Initialize SDKMAN
+        source "$HOME/.sdkman/bin/sdkman-init.sh"
+        
+        # Verify SDKMAN is working
+        if ! command -v sdk &> /dev/null; then
+          echo "❌ ERROR: SDKMAN initialization failed"
+          exit 1
+        fi
+
+        # Install Groovy
+        if [[ -n "${{ inputs.groovy-version }}" ]]; then
+          echo "Installing Groovy version: ${{ inputs.groovy-version }}"
+          
+          # Check if specific version is available
+          echo "Checking available Groovy versions..."
+          if ! sdk list groovy | grep -q "${{ inputs.groovy-version }}"; then
+            echo "❌ ERROR: Groovy version ${{ inputs.groovy-version }} is not available"
+            echo "Available versions:"
+            sdk list groovy | grep -E "^\s+[0-9]" | head -10
+            echo ""
+            echo "Please use one of the available versions or remove the groovy-version input to install the latest version."
+            exit 1
+          fi
+          
+          # Install specific version with error handling
+          if ! sdk install groovy "${{ inputs.groovy-version }}"; then
+            echo "❌ ERROR: Failed to install Groovy version ${{ inputs.groovy-version }}"
+            exit 1
+          fi
+          
+          if ! sdk use groovy "${{ inputs.groovy-version }}"; then
+            echo "❌ ERROR: Failed to activate Groovy version ${{ inputs.groovy-version }}"
+            exit 1
+          fi
+        else
+          echo "Installing latest stable Groovy version..."
+          if ! sdk install groovy; then
+            echo "❌ ERROR: Failed to install latest Groovy version"
+            exit 1
+          fi
+        fi
+
+        # Verify Groovy installation
+        if ! command -v groovy &> /dev/null; then
+          echo "❌ ERROR: Groovy installation failed"
+          exit 1
+        fi
+
+        # Make Groovy available in PATH for subsequent steps
+        if [[ "${{ inputs.add-to-path }}" == "true" ]]; then
+          GROOVY_BIN_PATH="$HOME/.sdkman/candidates/groovy/current/bin"
+          echo "$GROOVY_BIN_PATH" >> $GITHUB_PATH
+          export PATH="$GROOVY_BIN_PATH:$PATH"
+        fi
+
+        # Verify installation and set outputs
+        groovy --version
+        INSTALLED_VERSION=$(groovy --version | head -n1)
+        GROOVY_PATH="$HOME/.sdkman/candidates/groovy/current/bin"
+        
+        echo "groovy-version=${INSTALLED_VERSION}" >> $GITHUB_OUTPUT
+        echo "groovy-path=${GROOVY_PATH}" >> $GITHUB_OUTPUT
+        
+        echo "✅ Groovy environment setup completed successfully"
+
+    - name: Setup Groovy Environment (Windows)
+      id: setup-windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        
+        # Check if Groovy is already installed and skip-if-exists is true
+        if ("${{ inputs.skip-if-exists }}" -eq "true") {
+          try {
+            $existingGroovy = Get-Command groovy -ErrorAction Stop
+            $existingVersion = & groovy --version 2>$null | Select-Object -First 1
+            Write-Host "Groovy is already installed: $existingVersion"
+            echo "groovy-version=$existingVersion" >> $env:GITHUB_OUTPUT
+            echo "groovy-path=$((Get-Command groovy).Source | Split-Path)" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          catch {
+            Write-Host "Groovy not found, proceeding with installation..."
+          }
+        }
+        
+        # Set PowerShell execution policy for current process
+        Write-Host "Setting PowerShell execution policy..."
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+
+        # Check if Chocolatey is installed
+        try {
+          Get-Command choco -ErrorAction Stop
+          Write-Host "✅ Chocolatey is already installed"
+        }
+        catch {
+          Write-Host "Installing Chocolatey..."
+          try {
+            # Enhanced Chocolatey installation with better error handling
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            $env:chocolateyUseWindowsCompression = 'true'
+            
+            # Download and install Chocolatey with retry logic
+            $maxAttempts = 3
+            $attempt = 1
+            $installed = $false
+            
+            while ($attempt -le $maxAttempts -and -not $installed) {
+              Write-Host "Chocolatey installation attempt $attempt/$maxAttempts..."
+              try {
+                iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+                $installed = $true
+              }
+              catch {
+                Write-Host "❌ Chocolatey installation attempt $attempt failed: $_"
+                if ($attempt -eq $maxAttempts) {
+                  throw "Failed to install Chocolatey after $maxAttempts attempts"
+                }
+                $attempt++
+                Start-Sleep -Seconds 3
+              }
+            }
+            
+            # Refresh environment variables
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+            
+            # Verify Chocolatey installation
+            Get-Command choco -ErrorAction Stop
+            Write-Host "✅ Chocolatey installed successfully"
+          }
+          catch {
+            Write-Host "❌ ERROR: Failed to install Chocolatey: $_"
+            Write-Host "Please check network connectivity and Windows permissions"
+            exit 1
+          }
+        }
+
+        # Install Java if not present (Groovy requires Java)
+        try {
+          $javaVersion = & java -version 2>&1 | Select-Object -First 1
+          Write-Host "✅ Java is already installed: $javaVersion"
+        }
+        catch {
+          $javaVersion = "${{ inputs.java-version }}"
+          Write-Host "Java not found. Installing OpenJDK $javaVersion..."
+          try {
+            # Map Java version to Chocolatey package name
+            $chocoPackage = switch ($javaVersion) {
+              "8" { "openjdk8" }
+              "11" { "openjdk11" }
+              "17" { "openjdk17" }
+              "21" { "openjdk21" }
+              default { "openjdk" }  # Latest available
+            }
+            
+            # Install Java with timeout and error handling
+            $process = Start-Process -FilePath "choco" -ArgumentList "install",$chocoPackage,"-y","--no-progress","--timeout=300" -Wait -PassThru -NoNewWindow
+            
+            if ($process.ExitCode -ne 0) {
+              throw "Chocolatey Java installation failed with exit code: $($process.ExitCode)"
+            }
+            
+            # Refresh environment variables
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+            $env:JAVA_HOME = [System.Environment]::GetEnvironmentVariable("JAVA_HOME","Machine")
+            
+            # Verify Java installation
+            & java -version
+            Write-Host "✅ Java installed successfully"
+          }
+          catch {
+            Write-Host "❌ ERROR: Failed to install Java: $_"
+            Write-Host "Please ensure Chocolatey is working properly or pre-install Java"
+            exit 1
+          }
+        }
+
+        # Install Groovy
+        if ("${{ inputs.groovy-version }}" -ne "") {
+          Write-Host "Installing Groovy version: ${{ inputs.groovy-version }}"
+          
+          try {
+            # For specific versions, download from Apache Groovy releases
+            $version = "${{ inputs.groovy-version }}"
+            $downloadUrl = "https://groovy.jfrog.io/artifactory/dist-release-local/groovy-zips/apache-groovy-binary-$version.zip"
+            $groovyDir = "$env:ProgramFiles\Groovy"
+            
+            # Create Groovy directory
+            New-Item -ItemType Directory -Force -Path $groovyDir | Out-Null
+            
+            # Download Groovy
+            $zipPath = "$env:TEMP\groovy-$version.zip"
+            Write-Host "Downloading Groovy from: $downloadUrl"
+            
+            # Enhanced download with progress and error handling
+            $webClient = New-Object System.Net.WebClient
+            $webClient.Headers.Add("User-Agent", "GitHub-Actions-Setup-Groovy/1.0")
+            $webClient.DownloadFile($downloadUrl, $zipPath)
+            
+            # Verify download
+            if (-not (Test-Path $zipPath)) {
+              throw "Failed to download Groovy archive"
+            }
+            
+            # Extract to Program Files
+            Write-Host "Extracting Groovy..."
+            Expand-Archive -Path $zipPath -DestinationPath $groovyDir -Force
+            
+            # Find the extracted directory and rename it
+            $extractedDir = Get-ChildItem -Path $groovyDir -Directory | Where-Object { $_.Name -like "groovy-*" } | Select-Object -First 1
+            if ($extractedDir) {
+              $finalDir = Join-Path $groovyDir "current"
+              if (Test-Path $finalDir) {
+                Remove-Item $finalDir -Recurse -Force
+              }
+              Move-Item $extractedDir.FullName $finalDir
+            }
+            else {
+              throw "Failed to find extracted Groovy directory"
+            }
+            
+            # Clean up
+            Remove-Item $zipPath -Force
+            
+            $groovyBinPath = "$env:ProgramFiles\Groovy\current\bin"
+          }
+          catch {
+            Write-Host "❌ ERROR: Failed to install specific Groovy version: $_"
+            Write-Host "Falling back to latest version via Chocolatey..."
+            
+            try {
+              choco install groovy -y --no-progress
+              $groovyBinPath = (Get-Command groovy).Source | Split-Path
+            }
+            catch {
+              Write-Host "❌ ERROR: Failed to install Groovy via Chocolatey: $_"
+              exit 1
+            }
+          }
+        }
+        else {
+          Write-Host "Installing latest Groovy version using Chocolatey..."
+          try {
+            # Install with timeout and better error handling
+            $process = Start-Process -FilePath "choco" -ArgumentList "install","groovy","-y","--no-progress","--timeout=300" -Wait -PassThru -NoNewWindow
+            
+            if ($process.ExitCode -ne 0) {
+              throw "Chocolatey Groovy installation failed with exit code: $($process.ExitCode)"
+            }
+            
+            # Refresh environment variables
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+            
+            # Find Groovy installation
+            try {
+              $groovyBinPath = (Get-Command groovy).Source | Split-Path
+            }
+            catch {
+              # Fallback: look in common Chocolatey locations
+              $possiblePaths = @(
+                "${env:ProgramData}\chocolatey\lib\groovy\tools\groovy-*\bin",
+                "${env:ProgramFiles}\Groovy\bin",
+                "${env:ProgramFiles(x86)}\Groovy\bin"
+              )
+              
+              foreach ($path in $possiblePaths) {
+                $expandedPath = Get-ChildItem -Path $path -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+                if ($expandedPath -and (Test-Path "$expandedPath\groovy.bat")) {
+                  $groovyBinPath = $expandedPath
+                  $env:PATH = "$groovyBinPath;$env:PATH"
+                  break
+                }
+              }
+              
+              if (-not $groovyBinPath) {
+                throw "Could not locate Groovy installation after Chocolatey install"
+              }
+            }
+          }
+          catch {
+            Write-Host "❌ ERROR: Failed to install Groovy: $_"
+            Write-Host "Please check Chocolatey installation and network connectivity"
+            exit 1
+          }
+        }
+
+        # Add to PATH if requested
+        if ("${{ inputs.add-to-path }}" -eq "true") {
+          Write-Host "Adding Groovy to PATH: $groovyBinPath"
+          echo "$groovyBinPath" >> $env:GITHUB_PATH
+          $env:PATH = "$groovyBinPath;$env:PATH"
+        }
+
+        # Verify installation
+        try {
+          $installedVersion = & groovy --version | Select-Object -First 1
+          $groovyPath = (Get-Command groovy).Source | Split-Path
+          
+          Write-Host "✅ Groovy installation verified: $installedVersion"
+          Write-Host "Installation path: $groovyPath"
+          
+          echo "groovy-version=$installedVersion" >> $env:GITHUB_OUTPUT
+          echo "groovy-path=$groovyPath" >> $env:GITHUB_OUTPUT
+          
+          Write-Host "✅ Groovy environment setup completed successfully"
+        }
+        catch {
+          Write-Host "❌ ERROR: Groovy installation verification failed: $_"
+          Write-Host "Groovy was installed but cannot be executed. This may indicate:"
+          Write-Host "  - PATH environment variable issues"
+          Write-Host "  - Java installation problems"
+          Write-Host "  - Corrupted Groovy installation"
+          Write-Host ""
+          Write-Host "Current PATH: $env:PATH"
+          Write-Host "Java check:"
+          try { & java -version } catch { Write-Host "Java not available: $_" }
+          exit 1
+        }
+        
+        Write-Host "✅ Groovy environment setup completed successfully"
+        Write-Host "Installed version: $installedVersion"
+        Write-Host "Installation path: $groovyPath"
+
+    - name: Set Unified Outputs
+      id: setup
+      shell: bash
+      run: |
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          echo "groovy-version=${{ steps.setup-windows.outputs.groovy-version }}" >> $GITHUB_OUTPUT
+          echo "groovy-path=${{ steps.setup-windows.outputs.groovy-path }}" >> $GITHUB_OUTPUT
+        else
+          echo "groovy-version=${{ steps.setup-unix.outputs.groovy-version }}" >> $GITHUB_OUTPUT
+          echo "groovy-path=${{ steps.setup-unix.outputs.groovy-path }}" >> $GITHUB_OUTPUT
+        fi

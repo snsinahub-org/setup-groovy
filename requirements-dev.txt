@@ -1,0 +1,10 @@
+# Development Dependencies
+# 
+# This file lists Python packages needed for development and testing.
+# The action itself does not require Python - these are only for:
+# - YAML validation in tests
+# - Development tooling
+#
+# Install with: pip install -r requirements-dev.txt
+
+PyYAML>=6.0

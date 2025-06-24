@@ -1,0 +1,180 @@
+# Test Configuration for Setup Groovy Action
+# This file defines test scenarios and expected outcomes
+
+# Test Scenarios
+scenarios:
+  basic:
+    description: "Basic functionality tests across platforms"
+    platforms: ["ubuntu-latest", "windows-latest", "macos-latest"]
+    groovy_versions: ["latest"]
+    expected_outcomes:
+      - groovy_command_available: true
+      - outputs_set: true
+      - basic_script_execution: true
+
+  version_specific:
+    description: "Test specific Groovy versions"
+    platforms: ["ubuntu-latest", "windows-latest"]
+    groovy_versions: ["4.0.15", "4.0.21", "3.0.19"]
+    expected_outcomes:
+      - correct_version_installed: true
+      - version_specific_features: true
+
+  input_validation:
+    description: "Test action inputs and configurations"
+    platforms: ["ubuntu-latest"]
+    test_cases:
+      - name: "skip-if-exists"
+        inputs:
+          skip-if-exists: true
+        expected: "should_skip_second_install"
+      - name: "add-to-path"
+        inputs:
+          add-to-path: false
+        expected: "groovy_not_in_path"
+
+  error_handling:
+    description: "Test error scenarios"
+    platforms: ["ubuntu-latest"]
+    test_cases:
+      - name: "invalid_version"
+        inputs:
+          groovy-version: "99.99.99"
+        expected: "action_should_fail"
+
+  performance:
+    description: "Performance and stress tests"
+    platforms: ["ubuntu-latest"]
+    test_cases:
+      - name: "large_script"
+        script_size: "large"
+        expected: "reasonable_execution_time"
+      - name: "multiple_setups"
+        repetitions: 3
+        expected: "caching_improves_performance"
+
+# Expected Outputs Structure
+expected_outputs:
+  groovy-version:
+    type: "string"
+    pattern: "Groovy Version: \\d+\\.\\d+\\.\\d+"
+    required: true
+  groovy-path:
+    type: "string"
+    pattern: ".*groovy.*bin"
+    required: true
+
+# Security Checks
+security_checks:
+  - name: "no_command_injection"
+    pattern: "\\$\\{\\{.*\\}\\}.*\\|"
+    should_not_match: true
+  - name: "no_eval_user_input"
+    pattern: "eval.*\\$\\{\\{"
+    should_not_match: true
+  - name: "https_only"
+    pattern: "http://"
+    should_not_match: true
+
+# Performance Benchmarks
+performance_benchmarks:
+  installation_time:
+    unix_first_install: 120  # seconds
+    unix_cached_install: 10  # seconds
+    windows_first_install: 180  # seconds
+    windows_cached_install: 15  # seconds
+  
+  script_execution:
+    basic_script: 5  # seconds
+    complex_script: 30  # seconds
+
+# Compatibility Matrix
+compatibility:
+  operating_systems:
+    ubuntu:
+      versions: ["20.04", "22.04", "latest"]
+      status: "fully_supported"
+    windows:
+      versions: ["2019", "2022", "latest"]
+      status: "fully_supported"
+    macos:
+      versions: ["11", "12", "13", "latest"]
+      status: "fully_supported"
+  
+  groovy_versions:
+    supported:
+      - "4.0.21"
+      - "4.0.15"
+      - "3.0.19"
+      - "3.0.17"
+    latest_tested: "4.0.21"
+    minimum_supported: "3.0.0"
+
+# Test Data
+test_scripts:
+  basic:
+    content: |
+      println "Hello from Groovy ${GroovySystem.version}!"
+      println "Running on: ${System.getProperty('os.name')}"
+    expected_output: ["Hello from Groovy", "Running on:"]
+  
+  json_processing:
+    content: |
+      @Grab('org.apache.groovy:groovy-json:4.0.15')
+      import groovy.json.*
+      def data = [test: 'success']
+      println JsonOutput.toJson(data)
+    expected_output: ["test", "success"]
+  
+  file_operations:
+    content: |
+      def file = new File('test.txt')
+      file.text = 'Test content'
+      println file.text
+      file.delete()
+    expected_output: ["Test content"]
+
+# Environment Variables for Testing
+test_environment:
+  github_actions:
+    GITHUB_WORKSPACE: "/github/workspace"
+    GITHUB_RUN_NUMBER: "42"
+    GITHUB_WORKFLOW: "test-workflow"
+    RUNNER_OS: "Linux"  # Will be overridden per test
+  
+  simulated_build:
+    BUILD_NUMBER: "42"
+    PROJECT_NAME: "test-project"
+    WORKSPACE: "/build/workspace"
+
+# Validation Rules
+validation_rules:
+  action_yml:
+    required_fields:
+      - "name"
+      - "description"
+      - "runs"
+      - "inputs"
+      - "outputs"
+    
+    inputs_must_have:
+      - "groovy-version"
+      - "skip-if-exists"
+      - "add-to-path"
+    
+    outputs_must_have:
+      - "groovy-version"
+      - "groovy-path"
+  
+  readme:
+    required_sections:
+      - "Usage"
+      - "Inputs"
+      - "Outputs" 
+      - "Platform Support"
+      - "Troubleshooting"
+    
+    must_contain:
+      - "cross-platform"
+      - "example"
+      - "requirements"
